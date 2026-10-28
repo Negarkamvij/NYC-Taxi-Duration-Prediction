@@ -1,0 +1,4 @@
+# Initial data-audit dependencies; training libraries will be added after environment verification.
+numpy
+pandas
+pyarrow

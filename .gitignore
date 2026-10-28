@@ -1,0 +1,18 @@
+# Raw data and generated analysis
+/data/
+/outputs/
+/models/
+/logs/
+*.parquet
+*.keras
+*.h5
+*.pt
+*.pth
+# Local environments and secrets
+.venv/
+venv/
+.env
+.env.*
+__pycache__/
+.ipynb_checkpoints/
+.DS_Store
