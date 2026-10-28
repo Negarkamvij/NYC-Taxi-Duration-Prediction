@@ -1,0 +1,57 @@
+{
+  "source_rows": 6405008,
+  "weather_hours": 744,
+  "rain_hours": 67,
+  "snow_hours": 17,
+  "boundary_local": "2020-01-26 01:52:21-05:00",
+  "split_audit": [
+    {
+      "source_rows": 6405008,
+      "eligible_rows": 6400390,
+      "outside_eligibility_not_deleted": 4618,
+      "boundary_overlap_rows": 2096,
+      "preliminary_train_rows": 5118216,
+      "preliminary_validation_rows": 1280078,
+      "eligible_unmatched_weather_rows": 0,
+      "source_rows_removed": 0
+    }
+  ],
+  "weather_exposure": [
+    {
+      "split": "training",
+      "weather_class": "dry",
+      "taxi_rows": 4523176,
+      "distinct_weather_hours": 526
+    },
+    {
+      "split": "training",
+      "weather_class": "mixed",
+      "taxi_rows": 43106,
+      "distinct_weather_hours": 4
+    },
+    {
+      "split": "training",
+      "weather_class": "rain",
+      "taxi_rows": 439789,
+      "distinct_weather_hours": 59
+    },
+    {
+      "split": "training",
+      "weather_class": "snow",
+      "taxi_rows": 112145,
+      "distinct_weather_hours": 13
+    },
+    {
+      "split": "validation",
+      "weather_class": "dry",
+      "taxi_rows": 1229156,
+      "distinct_weather_hours": 139
+    },
+    {
+      "split": "validation",
+      "weather_class": "rain",
+      "taxi_rows": 50922,
+      "distinct_weather_hours": 4
+    }
+  ]
+}

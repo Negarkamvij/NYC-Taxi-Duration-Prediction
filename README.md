@@ -10,13 +10,20 @@ Does weather improve predictions of NYC Yellow Taxi ride duration, especially du
 The prediction is made at ride pickup, assuming the destination zone is known. Actual drop-off time, final fare, tips, tolls, and completed-trip distance are not input features. Historical weather must be checked for time zone, measurement interval, and availability before a join is implemented.
 
 ## Current status
-**Starter project, not a completed submission.** The notebook contains the project objective, assignment checklist, data download, record-preserving taxi audit, weather audit questions, and experiment design. Models, weather joins, and model results have not been implemented. Do not interpret this repository as a production system or an Uber implementation.
+**Data audit stage; not a completed submission.** All six current code cells have been executed with saved outputs. The notebook now includes the full January taxi audit, candidate hourly ERA5 weather coverage, time-zone checks, a retrospective timestamp association, and a preliminary split audit. Models are not trained and no model accuracy is claimed.
+
+### What the audit found
+All 6,405,008 taxi source rows are retained. The weather candidate has 744 January hours, 67 with positive rain and 17 with positive snowfall. The proposed validation period has only four rain-only hours and no snowy hours. This is too limited for strong weather-specific generalization claims. Many taxi rows share the same weather and are not independent weather events.
+
+**Next decision:** review a broader period and weather source before finalizing the training split. ERA5 is reanalysis, not an archived live observation or forecast. Its current use is a retrospective audit, not evidence of production-time availability.
+
+[Read the audit findings](reports/January_Audit.md) | [Data hashes and environment](reports/data_manifest.json)
 
 ## Start
 1. Open the notebook in Colab.
-2. Install the initial audit packages if needed: `pip install -r requirements.txt` (or `%pip install pandas numpy pyarrow` in Colab).
+2. Install the initial audit packages if needed: `pip install -r requirements.txt` (or `%pip install pandas numpy pyarrow matplotlib` in Colab).
 3. Run the setup and taxi audit cells in order. They download the original January 2020 TLC file if missing. The full file requires disk space and memory.
-4. Select and document a weather source, then add the weather coverage audit and join.
+4. Read the weather and split audit before model training. The weather cell downloads a small ERA5 candidate file if missing. A final source and period still need to be selected.
 
 January 2020 is the initial candidate because the assignment gives a January weather example. It is not presented as a mandatory assignment month. The final period may change based on weather coverage.
 
@@ -33,7 +40,9 @@ Weather/no-weather comparison, errors by weather and time, and examples of large
 
 ## Repository contents
 - `Taxi_Project_2.ipynb`: starter notebook with simple English explanations and typed, documented functions.
-- `requirements.txt`: initial data-audit dependencies only. Training dependencies will be added and tested later.
+- `requirements.txt`: taxi/weather-audit dependencies only. Training dependencies will be added and tested later.
+- `requirements-audit.lock.txt`: direct package versions used for the executed audit.
+- `reports/`: actual audit findings, source metadata, and file hashes; raw data remains excluded.
 - `.gitignore`: excludes raw data, models, credentials, and generated results.
 
 Project 1 remains in its separate repository. Source: [NYC TLC trip records](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page). Assignment weather example: [Meteostat, January 2020](https://meteostat.net/en/place/3BBKPQ?t=2020-01-01/2020-01-31).

@@ -1,0 +1,23 @@
+{
+  "taxi_file": {
+    "name": "yellow_tripdata_2020-01.parquet",
+    "rows": 6405008,
+    "sha256": "0c32c1d5ef0d37ac3ff1a3f1880f247cc40165edf18626e5a86866296a4a5b93",
+    "source": "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2020-01.parquet"
+  },
+  "weather_file": {
+    "name": "weather_era5_2020-01.json",
+    "sha256": "edacb9775c7f4483763d274b670e0e21f94ca75a0e99db033e9af8cced92e1d3",
+    "january_hours": 744,
+    "raw_timestamp_count": 792,
+    "kind": "retrospective reanalysis candidate, not a live-feed backtest"
+  },
+  "environment": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "pandas": "2.2.3",
+    "pyarrow": "26.0.0",
+    "matplotlib": "3.11.2"
+  },
+  "executed_code_cells": 6
+}

@@ -1,0 +1,10 @@
+{
+  "url": "https://archive-api.open-meteo.com/v1/archive?latitude=40.7075&longitude=-74.0113&start_date=2019-12-31&end_date=2020-02-01&hourly=temperature_2m%2Crelative_humidity_2m%2Cprecipitation%2Crain%2Csnowfall%2Cwind_speed_10m%2Csurface_pressure&models=era5&timezone=UTC&temperature_unit=celsius&wind_speed_unit=kmh&precipitation_unit=mm",
+  "downloaded_at_utc": "2026-10-28T22:10:02.452647+00:00",
+  "requested_location": "Wall Street area, NYC",
+  "requested_latitude": 40.7075,
+  "requested_longitude": -74.0113,
+  "dataset": "ERA5 reanalysis via Open-Meteo",
+  "purpose": "Retrospective weather candidate audit; not an as-issued forecast or a live observation feed",
+  "documentation": "https://open-meteo.com/en/docs/historical-weather-api"
+}

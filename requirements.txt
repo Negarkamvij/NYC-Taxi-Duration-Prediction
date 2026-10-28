@@ -1,4 +1,5 @@
-# Initial data-audit dependencies; training libraries will be added after environment verification.
+# Data and weather audit dependencies; model-training libraries are not added yet.
 numpy
 pandas
 pyarrow
+matplotlib

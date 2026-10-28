@@ -1,0 +1,6 @@
+# Direct package versions used for the executed audit (Python 3.12.14).
+# This is an audit snapshot, not a complete transitive environment lock.
+numpy==2.3.5
+pandas==2.2.3
+pyarrow==26.0.0
+matplotlib==3.11.2
