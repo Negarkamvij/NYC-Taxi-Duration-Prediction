@@ -1,0 +1,3 @@
+model,split,mae_minutes,rmse_minutes,r2,p90_absolute_error_minutes,negative_prediction_count
+training_median,validation,8.823180651398474,55.746279299499406,-0.0062417625587489756,13.966666666666665,0
+training_route_median_min20,validation,7.954811314464781,55.742293516578336,-0.006097877876087843,13.990000000000025,0

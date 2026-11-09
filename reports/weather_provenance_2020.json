@@ -1,0 +1,24 @@
+{
+  "url": "https://archive-api.open-meteo.com/v1/archive?latitude=40.7075&longitude=-74.0113&start_date=2019-12-31&end_date=2021-01-02&hourly=temperature_2m%2Crelative_humidity_2m%2Cprecipitation%2Crain%2Csnowfall%2Cwind_speed_10m%2Csurface_pressure&models=era5&timezone=UTC&temperature_unit=celsius&wind_speed_unit=kmh&precipitation_unit=mm",
+  "dataset": "ERA5 reanalysis via Open-Meteo",
+  "requested_location": [
+    40.7075,
+    -74.0113
+  ],
+  "returned_grid_location": [
+    40.75,
+    -74.0
+  ],
+  "units": {
+    "temperature_2m": "\u00b0C",
+    "relative_humidity_2m": "%",
+    "precipitation": "mm",
+    "rain": "mm",
+    "snowfall": "cm",
+    "wind_speed_10m": "km/h",
+    "surface_pressure": "hPa"
+  },
+  "downloaded_at_or_first_recorded_utc": "2026-11-09T16:05:58.552041+00:00",
+  "limitation": "Retrospective reconstruction, not an as-issued forecast or live-feed backtest",
+  "sha256": "2d3b4abf2347d6e27dbabcd94b855cb8c76b9a0bb35d9291bd120e7502b9493c"
+}

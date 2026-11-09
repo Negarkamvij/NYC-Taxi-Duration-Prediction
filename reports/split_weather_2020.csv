@@ -1,0 +1,11 @@
+split,weather_class,taxi_rows,distinct_hours,distinct_days
+train,dry,34442,3718,241
+train,mixed,103,7,4
+train,rain,5219,623,119
+train,snow,235,14,4
+validation,dry,8798,1639,95
+validation,rain,1201,202,34
+test,dry,8731,591,31
+test,mixed,157,8,2
+test,rain,863,69,12
+test,snow,249,17,4

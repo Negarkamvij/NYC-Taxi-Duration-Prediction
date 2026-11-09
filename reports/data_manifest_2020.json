@@ -1,0 +1,92 @@
+{
+  "seed": 672,
+  "sample_size_jan_nov": 50000,
+  "sample_size_december": 10000,
+  "sampling": "Uniform random priorities over eligible source rows, not equal monthly quotas",
+  "files": [
+    {
+      "month": 1,
+      "file": "yellow_tripdata_2020-01.parquet",
+      "sha256": "0c32c1d5ef0d37ac3ff1a3f1880f247cc40165edf18626e5a86866296a4a5b93",
+      "source_rows": 6405008,
+      "eligible_rows": 6400390
+    },
+    {
+      "month": 2,
+      "file": "yellow_tripdata_2020-02.parquet",
+      "sha256": "e57df0e7c410c02d78cd59a31394a118f3d92c50560a2d8fa3a2bf5e17dcffaa",
+      "source_rows": 6299367,
+      "eligible_rows": 6295089
+    },
+    {
+      "month": 3,
+      "file": "yellow_tripdata_2020-03.parquet",
+      "sha256": "6fa1343946bc1e3702fc351ff9818787cc40e4cf2b095d947ff5e452b5b42f84",
+      "source_rows": 3007687,
+      "eligible_rows": 3005115
+    },
+    {
+      "month": 4,
+      "file": "yellow_tripdata_2020-04.parquet",
+      "sha256": "3104e1e5548ade630988a4a8b9ec76c51a057b88159f78676c7d344f48491450",
+      "source_rows": 238073,
+      "eligible_rows": 237626
+    },
+    {
+      "month": 5,
+      "file": "yellow_tripdata_2020-05.parquet",
+      "sha256": "f6167e3c8f1039ec4015cb121e73f8e08710ad1681da747f2b5aa504008cf289",
+      "source_rows": 348415,
+      "eligible_rows": 347762
+    },
+    {
+      "month": 6,
+      "file": "yellow_tripdata_2020-06.parquet",
+      "sha256": "1ad5d65c3951d9082ab5e24acca2235cc34f014a34b4225556cb9a885cb1101d",
+      "source_rows": 549797,
+      "eligible_rows": 549204
+    },
+    {
+      "month": 7,
+      "file": "yellow_tripdata_2020-07.parquet",
+      "sha256": "14a450d61c1828a3e9f3f29e3e2594b4c0eb687cd2fb0e9eeb2e10dbed9e4eb2",
+      "source_rows": 800412,
+      "eligible_rows": 799509
+    },
+    {
+      "month": 8,
+      "file": "yellow_tripdata_2020-08.parquet",
+      "sha256": "e1242bad250d52371f59dbe35e1925897dd6699a68130d69e49126b3e4ec8e86",
+      "source_rows": 1007286,
+      "eligible_rows": 1006434
+    },
+    {
+      "month": 9,
+      "file": "yellow_tripdata_2020-09.parquet",
+      "sha256": "353574457176ea1528ba1c07128fa90cf6594920b26bc79721dc844077696606",
+      "source_rows": 1341017,
+      "eligible_rows": 1336360
+    },
+    {
+      "month": 10,
+      "file": "yellow_tripdata_2020-10.parquet",
+      "sha256": "4e447b9c7cc6c48f6c0bf62ca93ef0051ff89b06d3d039a3c3489cf64a9c7e41",
+      "source_rows": 1681132,
+      "eligible_rows": 1674580
+    },
+    {
+      "month": 11,
+      "file": "yellow_tripdata_2020-11.parquet",
+      "sha256": "478716ac6420213ab45d9a1107fe5a1ba8c59de0e4bc27588b6f3b2079ad7210",
+      "source_rows": 1509000,
+      "eligible_rows": 1499269
+    },
+    {
+      "month": 12,
+      "file": "yellow_tripdata_2020-12.parquet",
+      "sha256": "b3e029240c4af3b8bc373169a7412150d5eb1721e2b8498975c13226dfd2bb55",
+      "source_rows": 1461898,
+      "eligible_rows": 1455478
+    }
+  ]
+}

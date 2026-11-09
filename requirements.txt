@@ -1,5 +1,9 @@
-# Data and weather audit dependencies; model-training libraries are not added yet.
+# Workflow dependencies. See requirements-training-snapshot.txt for the tested direct versions.
 numpy
 pandas
 pyarrow
 matplotlib
+scikit-learn
+tensorflow
+torch
+joblib
