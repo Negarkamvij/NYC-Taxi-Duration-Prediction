@@ -1,0 +1,7 @@
+{
+  "validation_start_local": "2020-08-28 01:00:00-04:00",
+  "training_rows": 39999,
+  "validation_rows": 9999,
+  "training_percent": 80.00120004800192,
+  "boundary_crossing_training_rows": 2
+}

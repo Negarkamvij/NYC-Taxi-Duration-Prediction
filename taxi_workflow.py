@@ -1,365 +1,428 @@
-"""CS672 taxi-duration workflow: preserve sources and evaluate time-ordered models."""
-from __future__ import annotations
+"""Project implementation exported into Taxi_Project_2.ipynb; edit the notebook."""
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.parse import urlencode
-from datetime import datetime, timezone
-import hashlib, json, shutil, time
+import json
+import shutil
+import time
 import numpy as np
 import pandas as pd
 
 SEED = 672
-WEATHER = ['temperature_2m','relative_humidity_2m','precipitation','rain','snowfall','wind_speed_10m','surface_pressure']
-NUMERIC = ['passenger_count','log_trip_distance','days_since_year_start']
-CATEGORICAL = ['pickup_zone','destination_zone','pickup_hour','pickup_weekday','pickup_month']
-TARGET = 'duration_minutes'
+WEATHER = ["temperature_2m", "relative_humidity_2m", "precipitation", "rain", "snowfall", "wind_speed_10m", "surface_pressure"]
+NUMERIC = ["passenger_count", "log_trip_distance"]
+CATEGORICAL = ["pickup_zone", "destination_zone", "pickup_hour", "pickup_weekday"]
+TARGET = "duration_minutes"
 
 
-def file_hash(path: Path) -> str:
-    """Return a file's SHA-256 digest without loading the whole file into memory."""
-    digest = hashlib.sha256()
-    with path.open('rb') as stream:
-        for chunk in iter(lambda: stream.read(1024*1024), b''):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def download_file(url: str, path: Path) -> Path:
-    """Download a missing file atomically; preserve existing local source files."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        partial = Path(str(path)+'.part')
-        for attempt in range(3):
-            try:
-                with urlopen(Request(url, headers={'User-Agent':'CS672-taxi-study'}), timeout=120) as response, partial.open('wb') as output:
-                    shutil.copyfileobj(response, output)
-                partial.replace(path)
-                break
-            except OSError:
-                if attempt == 2:
-                    raise
-                time.sleep(2)
-    return path
-
-
-def load_weather(root: Path) -> pd.DataFrame:
-    """Download/cache full-year ERA5 and return hourly UTC values with provenance.
-
-    Precipitation describes the preceding hour. Reanalysis is retrospective and
-    does not establish the real-time availability of these weather measurements.
-    """
-    path = root/'data/weather_era5_2020.json'
-    params = dict(latitude=40.7075, longitude=-74.0113, start_date='2019-12-31', end_date='2021-01-02',
-                  hourly=','.join(WEATHER), models='era5', timezone='UTC', temperature_unit='celsius',
-                  wind_speed_unit='kmh', precipitation_unit='mm')
-    url = 'https://archive-api.open-meteo.com/v1/archive?'+urlencode(params)
-    download_file(url,path)
-    payload=json.loads(path.read_text())
-    units={'temperature_2m':'°C','relative_humidity_2m':'%','precipitation':'mm','rain':'mm','snowfall':'cm','wind_speed_10m':'km/h','surface_pressure':'hPa'}
-    assert all(payload['hourly_units'][k]==v for k,v in units.items())
-    weather=pd.DataFrame(payload['hourly'])
-    weather['weather_time_utc']=pd.to_datetime(weather.pop('time'),utc=True)
-    weather=weather.sort_values('weather_time_utc').reset_index(drop=True)
-    assert weather.weather_time_utc.is_unique
-    assert weather.weather_time_utc.diff().dropna().eq(pd.Timedelta(hours=1)).all()
-    weather['weather_class']=weather_classes(weather)
-    provenance=dict(url=url,dataset='ERA5 reanalysis via Open-Meteo',requested_location=[40.7075,-74.0113],
-                    returned_grid_location=[payload['latitude'],payload['longitude']],units=units,
-                    downloaded_at_or_first_recorded_utc=datetime.now(timezone.utc).isoformat(),
-                    limitation='Retrospective reconstruction, not an as-issued forecast or live-feed backtest',sha256=file_hash(path))
-    report=root/'reports';report.mkdir(exist_ok=True)
-    if not (report/'weather_provenance_2020.json').exists():
-        (report/'weather_provenance_2020.json').write_text(json.dumps(provenance,indent=2))
-    local=weather.weather_time_utc.dt.tz_convert('America/New_York')
-    coverage=weather.loc[local.dt.year.eq(2020)].copy()
-    coverage['month']=local.loc[coverage.index].dt.month
-    coverage.groupby(['month','weather_class']).size().rename('distinct_hours').reset_index().to_csv(report/'weather_coverage_2020.csv',index=False)
-    return weather
+def download_file(url: str, destination: Path) -> Path:
+    """Download a missing source file without overwriting an existing file."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if not destination.exists():
+        partial = Path(str(destination) + ".part")
+        with urlopen(Request(url, headers={"User-Agent": "CS672-project"}), timeout=120) as response:
+            with partial.open("wb") as output:
+                shutil.copyfileobj(response, output)
+        partial.replace(destination)
+    return destination
 
 
 def weather_classes(frame: pd.DataFrame) -> pd.Series:
-    """Return exclusive weather labels, keeping missing precipitation unknown."""
-    missing=frame[['rain','snowfall','precipitation']].isna().any(axis=1)
-    rain=frame.rain.gt(0);snow=frame.snowfall.gt(0)
-    return pd.Series(np.select([missing,rain&snow,snow,rain,frame.precipitation.eq(0)],
-                              ['unknown','mixed','snow','rain','dry'],default='other_or_trace'),index=frame.index)
+    """Label precipitation, preserving missing values as unknown."""
+    missing = frame[["rain", "snowfall", "precipitation"]].isna().any(axis=1)
+    rain = frame["rain"].gt(0)
+    snow = frame["snowfall"].gt(0)
+    labels = np.select([missing, rain & snow, snow, rain, frame["precipitation"].eq(0)],
+                       ["unknown", "mixed", "snow", "rain", "dry"], default="other_or_trace")
+    return pd.Series(labels, index=frame.index)
+
+
+def load_weather(root: Path) -> pd.DataFrame:
+    """Load hourly NYC ERA5 values in Celsius and UTC."""
+    parameters = {
+        "latitude": 40.7075, "longitude": -74.0113,
+        "start_date": "2019-12-31", "end_date": "2021-01-02",
+        "hourly": ",".join(WEATHER), "models": "era5", "timezone": "UTC",
+        "temperature_unit": "celsius", "wind_speed_unit": "kmh", "precipitation_unit": "mm",
+    }
+    url = "https://archive-api.open-meteo.com/v1/archive?" + urlencode(parameters)
+    path = download_file(url, root / "data/weather_era5_2020.json")
+    payload = json.loads(path.read_text())
+    expected_units = {"temperature_2m": "°C", "relative_humidity_2m": "%", "precipitation": "mm",
+                      "rain": "mm", "snowfall": "cm", "wind_speed_10m": "km/h", "surface_pressure": "hPa"}
+    assert all(payload["hourly_units"][name] == unit for name, unit in expected_units.items())
+    weather = pd.DataFrame(payload["hourly"])
+    weather["weather_time_utc"] = pd.to_datetime(weather.pop("time"), utc=True)
+    weather = weather.sort_values("weather_time_utc").reset_index(drop=True)
+    assert weather["weather_time_utc"].is_unique
+    assert weather["weather_time_utc"].diff().dropna().eq(pd.Timedelta(hours=1)).all()
+    weather["weather_class"] = weather_classes(weather)
+    return weather
 
 
 def local_utc(values: pd.Series) -> pd.Series:
-    """Convert naive New York timestamps to UTC; flag unresolved DST times as NaT."""
-    return pd.to_datetime(values,errors='coerce').dt.tz_localize('America/New_York',ambiguous='NaT',nonexistent='NaT').dt.tz_convert('UTC')
+    """Convert New York wall-clock times, marking unresolved DST times unavailable."""
+    parsed = pd.to_datetime(values, errors="coerce")
+    localized = parsed.dt.tz_localize("America/New_York", ambiguous="NaT", nonexistent="NaT")
+    return localized.dt.tz_convert("UTC")
 
 
 def prepare_sample(root: Path, weather: pd.DataFrame, sample_size: int = 50000) -> pd.DataFrame:
-    """Audit every monthly source row and uniformly sample eligible trips.
-
-    January-November form one uniform-priority modeling sample. Original files stay intact. Unknown zones remain categories.
-    Eligibility requires valid UTC times, positive duration and intended month;
-    long rides are flagged but not discarded by a duration or distance threshold. Recorded distance is used in this offline regression; live use would require an estimated route distance.
-    """
-    report=root/'reports';report.mkdir(exist_ok=True)
-    pool=pd.DataFrame();test=pd.DataFrame();audits=[];manifest=[]
-    cols=['tpep_pickup_datetime','tpep_dropoff_datetime','PULocationID','DOLocationID','passenger_count','trip_distance']
-    for month in range(1,12):
-        name=f'yellow_tripdata_2020-{month:02d}.parquet'
-        path=download_file('https://d37ci6vzurychx.cloudfront.net/trip-data/'+name,root/'data'/name)
-        raw=pd.read_parquet(path,columns=cols)
-        pickup=local_utc(raw.tpep_pickup_datetime);dropoff=local_utc(raw.tpep_dropoff_datetime)
-        duration=(dropoff-pickup).dt.total_seconds()/60
-        local=pickup.dt.tz_convert('America/New_York')
-        in_month=local.dt.year.eq(2020)&local.dt.month.eq(month)
-        valid=pickup.notna()&dropoff.notna()&np.isfinite(duration)&duration.gt(0)&in_month
-        audit={'month':month,'source_rows':len(raw),'eligible_rows':int(valid.sum()),'ineligible_not_deleted':int((~valid).sum()),
-               'missing_or_unresolved_time':int((pickup.isna()|dropoff.isna()).sum()),'outside_intended_month':int((~in_month).sum()),
-               'nonpositive_or_unavailable_duration':int((~np.isfinite(duration)|duration.le(0)).sum()),
-               'long_duration_flag':int(duration.gt(180).sum()),'negative_or_nonfinite_distance':int((raw.trip_distance.lt(0)|~np.isfinite(raw.trip_distance)).sum()),
-               'long_distance_flag':int(raw.trip_distance.gt(100).sum()),'source_rows_removed':0}
-        audits.append(audit)
-        # Random priorities do not depend on trip duration or weather.
-        priority=np.random.default_rng(SEED+month).random(len(raw))
-        indices=np.flatnonzero(valid.to_numpy());cap=sample_size
-        if len(indices)>cap:
-            indices=indices[np.argpartition(priority[indices],cap-1)[:cap]]
-        candidate=pd.DataFrame({'row_id':[f'{month:02d}:{i}' for i in indices],
-                                'pickup_utc':pickup.iloc[indices].to_numpy(),'dropoff_utc':dropoff.iloc[indices].to_numpy(),
-                                TARGET:duration.iloc[indices].to_numpy(),'priority':priority[indices],
-                                'passenger_count':raw.passenger_count.iloc[indices].to_numpy(),
-                                'trip_distance':raw.trip_distance.iloc[indices].to_numpy()})
-        for source,dest in [('PULocationID','pickup_zone'),('DOLocationID','destination_zone')]:
-            zones=raw[source].iloc[indices]
-            candidate[dest]=zones.where(zones.between(1,263)&zones.mod(1).eq(0),0).fillna(0).astype(int).astype(str).to_numpy()
-        candidate['passenger_count']=candidate.passenger_count.where(candidate.passenger_count.ge(0))
-        candidate['log_trip_distance']=np.log1p(candidate.trip_distance.where(candidate.trip_distance.ge(0)&np.isfinite(candidate.trip_distance)))
-        pool=pd.concat([pool,candidate],ignore_index=True).nsmallest(sample_size,'priority')
-        manifest.append({'month':month,'file':name,'sha256':file_hash(path),'source_rows':len(raw),'eligible_rows':int(valid.sum())})
-        print(f'Month {month:02d}: {len(raw):,} source rows, {int(valid.sum()):,} eligible; source rows removed: 0',flush=True)
-        del raw,pickup,dropoff,duration,priority,local
-    frame=pd.concat([pool,test],ignore_index=True).sort_values('pickup_utc').reset_index(drop=True)
-    frame['pickup_utc']=pd.to_datetime(frame.pickup_utc,utc=True)
-    frame['dropoff_utc']=pd.to_datetime(frame.dropoff_utc,utc=True)
-    assert frame.row_id.is_unique
-    frame['weather_time_utc']=frame.pickup_utc.dt.floor('h')
-    frame=frame.merge(weather,on='weather_time_utc',how='left',validate='many_to_one')
-    assert len(frame)==len(pool)+len(test)
-    # A join timestamp is a measurement time, not a proven publication time.
-    assert frame.weather_time_utc.le(frame.pickup_utc).all()
-    frame['weather_class']=frame.weather_class.fillna('unmatched')
-    local=frame.pickup_utc.dt.tz_convert('America/New_York')
-    frame['pickup_hour']=local.dt.hour.astype(str)
-    frame['pickup_weekday']=local.dt.dayofweek.astype(str)
-    frame['pickup_month']=local.dt.month.astype(str)
-    frame['days_since_year_start']=(local.dt.tz_localize(None)-pd.Timestamp('2020-01-01')).dt.total_seconds()/86400
-    pd.DataFrame(audits).to_csv(report/'source_audit_2020.csv',index=False)
-    (report/'data_manifest_2020.json').write_text(json.dumps({'seed':SEED,'sample_size':len(pool),'modeling_period':'January-November 2020','sampling':'Uniform random priorities over eligible source rows, not equal monthly quotas','files':manifest},indent=2))
-    (root/'outputs').mkdir(exist_ok=True)
-    frame.to_parquet(root/'outputs/assignment_sample.parquet',index=False)
-    return frame
+    """Uniformly sample eligible January-November rows while preserving raw files."""
+    sample_pool = pd.DataFrame()
+    monthly_counts = []
+    columns = ["tpep_pickup_datetime", "tpep_dropoff_datetime", "PULocationID", "DOLocationID", "passenger_count", "trip_distance"]
+    for month in range(1, 12):
+        filename = f"yellow_tripdata_2020-{month:02d}.parquet"
+        path = download_file("https://d37ci6vzurychx.cloudfront.net/trip-data/" + filename, root / "data" / filename)
+        raw = pd.read_parquet(path, columns=columns)
+        pickup = local_utc(raw["tpep_pickup_datetime"])
+        dropoff = local_utc(raw["tpep_dropoff_datetime"])
+        duration = (dropoff - pickup).dt.total_seconds() / 60
+        local = pickup.dt.tz_convert("America/New_York")
+        intended_month = local.dt.year.eq(2020) & local.dt.month.eq(month)
+        eligible = pickup.notna() & dropoff.notna() & np.isfinite(duration) & duration.gt(0) & intended_month
+        monthly_counts.append({"month": month, "source_rows": len(raw), "eligible_rows": int(eligible.sum()),
+                               "invalid_or_outside_month": int((~eligible).sum()), "duration_over_180_minutes": int(duration.gt(180).sum())})
+        priorities = np.random.default_rng(SEED + month).random(len(raw))
+        positions = np.flatnonzero(eligible.to_numpy())
+        if len(positions) > sample_size:
+            positions = positions[np.argpartition(priorities[positions], sample_size - 1)[:sample_size]]
+        part = pd.DataFrame({
+            "row_id": [f"{month:02d}:{position}" for position in positions],
+            "pickup_utc": pickup.iloc[positions].to_numpy(),
+            "dropoff_utc": dropoff.iloc[positions].to_numpy(),
+            TARGET: duration.iloc[positions].to_numpy(),
+            "priority": priorities[positions],
+            "passenger_count": raw["passenger_count"].iloc[positions].to_numpy(),
+            "trip_distance": raw["trip_distance"].iloc[positions].to_numpy(),
+        })
+        for original, feature in [("PULocationID", "pickup_zone"), ("DOLocationID", "destination_zone")]:
+            zones = raw[original].iloc[positions]
+            zones = zones.where(zones.between(1, 263) & zones.mod(1).eq(0), 0)
+            part[feature] = zones.fillna(0).astype(int).astype(str).to_numpy()
+        part["passenger_count"] = part["passenger_count"].where(part["passenger_count"].ge(0))
+        valid_distance = part["trip_distance"].where(part["trip_distance"].ge(0) & np.isfinite(part["trip_distance"]))
+        part["log_trip_distance"] = np.log1p(valid_distance)
+        sample_pool = pd.concat([sample_pool, part], ignore_index=True).nsmallest(sample_size, "priority")
+    sample = sample_pool.sort_values("pickup_utc").reset_index(drop=True)
+    sample["pickup_utc"] = pd.to_datetime(sample["pickup_utc"], utc=True)
+    sample["dropoff_utc"] = pd.to_datetime(sample["dropoff_utc"], utc=True)
+    sample["weather_time_utc"] = sample["pickup_utc"].dt.floor("h")
+    sample = sample.merge(weather, on="weather_time_utc", how="left", validate="many_to_one")
+    local = sample["pickup_utc"].dt.tz_convert("America/New_York")
+    sample["pickup_hour"] = local.dt.hour.astype(str)
+    sample["pickup_weekday"] = local.dt.dayofweek.astype(str)
+    sample["weather_class"] = sample["weather_class"].fillna("unknown")
+    assert len(sample) == sample_size and sample["row_id"].is_unique
+    (root / "reports").mkdir(exist_ok=True)
+    pd.DataFrame(monthly_counts).to_csv(root / "reports/source_counts.csv", index=False)
+    sample.to_parquet(root / "outputs/assignment_sample.parquet", index=False)
+    return sample
 
 
+def split_data(data: pd.DataFrame, root: Path) -> dict[str, pd.DataFrame]:
+    """Use a whole-hour chronological 80/20 boundary and exclude crossing training labels."""
+    ordered = data.sort_values("pickup_utc")
+    boundary = ordered["pickup_utc"].iloc[int(len(ordered) * 0.8)].ceil("h")
+    earlier = ordered.loc[ordered["pickup_utc"].lt(boundary)]
+    train = earlier.loc[earlier["dropoff_utc"].lt(boundary)].copy()
+    validation = ordered.loc[ordered["pickup_utc"].ge(boundary)].copy()
+    assert train["dropoff_utc"].max() < validation["pickup_utc"].min()
+    assert set(train["weather_time_utc"]).isdisjoint(validation["weather_time_utc"])
+    splits = {"train": train, "validation": validation}
+    summary = {"validation_start_local": str(boundary.tz_convert("America/New_York")),
+               "training_rows": len(train), "validation_rows": len(validation),
+               "training_percent": 100 * len(train) / (len(train) + len(validation)),
+               "boundary_crossing_training_rows": len(earlier) - len(train)}
+    (root / "reports").mkdir(exist_ok=True)
+    (root / "reports/split.json").write_text(json.dumps(summary, indent=2))
+    month_counts = pd.DataFrame({name: part["pickup_utc"].dt.tz_convert("America/New_York").dt.month.value_counts()
+                                 for name, part in splits.items()}).fillna(0).astype(int).sort_index()
+    month_counts.index.name = "pickup_month"
+    month_counts.to_csv(root / "reports/month_counts.csv")
+    return splits
 
 
-def prepare_inputs(splits: dict[str,pd.DataFrame], with_weather: bool = True) -> tuple[object,dict[str,np.ndarray],dict[str,np.ndarray]]:
-    """Fit numeric imputation/scaling and category encoding on training rows only."""
+def prepare_inputs(splits: dict[str, pd.DataFrame], variant: str = "full", with_weather: bool = True) -> tuple[object, dict[str, np.ndarray], dict[str, np.ndarray], list[str]]:
+    """Fit imputation, 0-1 scaling, and category encoding on training rows only."""
     from sklearn.compose import ColumnTransformer
     from sklearn.impute import SimpleImputer
     from sklearn.pipeline import Pipeline
-    from sklearn.preprocessing import MinMaxScaler,OneHotEncoder
-    numeric=NUMERIC+(WEATHER if with_weather else [])
-    # Fixed calendar/zone domains are public definitions, not validation-derived vocabularies.
-    categories=[[str(i) for i in range(264)],[str(i) for i in range(264)],
-                [str(i) for i in range(24)],[str(i) for i in range(7)],[str(i) for i in range(1,13)]]
-    preprocessing=ColumnTransformer([
-        ('numeric',Pipeline([('missing',SimpleImputer(strategy='median',add_indicator=True,keep_empty_features=True)),('scale',MinMaxScaler(feature_range=(0,1),clip=True))]),numeric),
-        ('category',OneHotEncoder(categories=categories,handle_unknown='ignore',sparse_output=False,dtype=np.float32),CATEGORICAL),
-    ],sparse_threshold=0)
-    preprocessing.fit(splits['train'])
-    inputs={name:preprocessing.transform(part).astype('float32') for name,part in splits.items()}
-    targets={name:part[TARGET].to_numpy(dtype='float32') for name,part in splits.items()}
-    assert all(np.isfinite(x).all() for x in inputs.values())
-    return preprocessing,inputs,targets
+    from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
+    numeric = NUMERIC.copy()
+    categorical = CATEGORICAL.copy()
+    if variant == "distance_only":
+        numeric = ["log_trip_distance"]
+        categorical = []
+        with_weather = False
+    elif variant == "no_distance":
+        numeric.remove("log_trip_distance")
+    if variant == "no_weather":
+        with_weather = False
+    if with_weather:
+        numeric.extend(WEATHER)
+    numeric_pipeline = Pipeline([
+        ("imputer", SimpleImputer(strategy="median", add_indicator=variant != "distance_only", keep_empty_features=True)),
+        ("scaler", MinMaxScaler(feature_range=(0, 1), clip=True)),
+    ])
+    transformers = [("numeric", numeric_pipeline, numeric)]
+    if categorical:
+        categories = [[str(value) for value in range(264)], [str(value) for value in range(264)],
+                      [str(value) for value in range(24)], [str(value) for value in range(7)]]
+        encoder = OneHotEncoder(categories=categories, handle_unknown="ignore", sparse_output=False, dtype=np.float32)
+        transformers.append(("categories", encoder, categorical))
+    preprocessing = ColumnTransformer(transformers, sparse_threshold=0)
+    preprocessing.fit(splits["train"])
+    inputs = {name: preprocessing.transform(part).astype("float32") for name, part in splits.items()}
+    targets = {name: part[TARGET].to_numpy(dtype="float32") for name, part in splits.items()}
+    for matrix in inputs.values():
+        assert np.isfinite(matrix).all() and matrix.min() >= 0 and matrix.max() <= 1.000001
+    return preprocessing, inputs, targets, numeric + categorical
 
 
-def metrics(actual: np.ndarray, predicted: np.ndarray) -> dict[str,float]:
-    """Return common duration metrics in minutes without silently clipping predictions."""
-    from sklearn.metrics import mean_absolute_error,mean_squared_error,r2_score
-    actual=np.asarray(actual).reshape(-1);predicted=np.asarray(predicted).reshape(-1)
-    return {'mae_minutes':float(mean_absolute_error(actual,predicted)),
-            'rmse_minutes':float(np.sqrt(mean_squared_error(actual,predicted))),
-            'r2':float(r2_score(actual,predicted)),
-            'p90_absolute_error_minutes':float(np.quantile(np.abs(actual-predicted),.9)),
-            'negative_prediction_count':int((predicted<0).sum())}
-
-
+def duration_metrics(actual: np.ndarray, predicted: np.ndarray) -> dict:
+    """Calculate primary all-row and additional at-most-180-minute metrics."""
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+    actual = np.asarray(actual).reshape(-1)
+    predicted = np.asarray(predicted).reshape(-1)
+    metrics = {}
+    for prefix, mask in [("all", np.ones(len(actual), dtype=bool)), ("upto180", actual <= 180)]:
+        metrics[prefix + "_mae"] = float(mean_absolute_error(actual[mask], predicted[mask]))
+        metrics[prefix + "_rmse"] = float(np.sqrt(mean_squared_error(actual[mask], predicted[mask])))
+        metrics[prefix + "_r2"] = float(r2_score(actual[mask], predicted[mask]))
+        metrics[prefix + "_rows"] = int(mask.sum())
+    error = predicted - actual
+    tail = actual > 180
+    squared_total = np.square(error).sum()
+    absolute_total = np.abs(error).sum()
+    metrics["tail_squared_error_percent"] = float(100 * np.square(error[tail]).sum() / squared_total) if squared_total else 0.0
+    metrics["tail_absolute_error_percent"] = float(100 * np.abs(error[tail]).sum() / absolute_total) if absolute_total else 0.0
+    metrics["tail_mae_contribution_minutes"] = float(np.abs(error[tail]).sum() / len(actual))
+    metrics["tail_rows"] = int(tail.sum())
+    metrics["p90_absolute_error"] = float(np.quantile(np.abs(error), 0.9))
+    metrics["negative_predictions"] = int((predicted < 0).sum())
+    return metrics
 
 
 def experiment_grid() -> list[dict]:
-    """Return the explicit 36-run grid covering three architectures and required settings."""
+    """Return all 36 required model/loss/optimizer/learning-rate configurations."""
     import itertools
-    return [dict(architecture=a,loss=l,optimizer=o,learning_rate=lr,with_weather=True,epochs=100,batch_size=32,seed=SEED)
-            for a,l,o,lr in itertools.product(['linear','mlp','dnn'],['mse','mae'],['sgd','adam','rmsprop'],[.001,.01])]
+    return [dict(architecture=architecture, loss=loss, optimizer=optimizer, learning_rate=rate,
+                 seed=SEED, feature_variant="full", with_weather=True, epochs=100, batch_size=32)
+            for architecture, loss, optimizer, rate in itertools.product(
+                ["linear", "mlp", "dnn"], ["mse", "mae"], ["sgd", "adam", "rmsprop"], [0.001, 0.01])]
+
+
+def run_identifier(config: dict) -> str:
+    """Create a readable unique ID including model settings, seed, and feature variant."""
+    rate = format(config["learning_rate"], ".6g").replace(".", "p")
+    dropout = config.get("dropout", 0)
+    suffix = "_dropout" + str(dropout).replace(".", "p") if dropout else ""
+    variant = config["feature_variant"]
+    if variant == "full" and not config.get("with_weather", True):
+        variant = "no_weather"
+    return f"{config['architecture']}_{config['loss']}_{config['optimizer']}_lr{rate}_seed{config['seed']}_{variant}{suffix}"
 
 
 def build_tensorflow(config: dict, width: int) -> object:
-    """Build a Keras linear, one-hidden-layer MLP, or two-hidden-layer DNN."""
+    """Build a linear model, 64-unit MLP, or 64/32-unit DNN in Keras."""
     import tensorflow as tf
-    tf.keras.utils.set_random_seed(config['seed'])
-    layers=[tf.keras.layers.Input(shape=(width,))]
-    if config['architecture'] in ['mlp','dnn']:
-        layers.append(tf.keras.layers.Dense(64,activation='relu'))
-    if config['architecture']=='dnn':
-        layers.append(tf.keras.layers.Dense(32,activation='relu'))
+    tf.keras.utils.set_random_seed(config["seed"])
+    layers = [tf.keras.layers.Input(shape=(width,))]
+    if config["architecture"] in ["mlp", "dnn"]:
+        layers.append(tf.keras.layers.Dense(64, activation="relu"))
+        if config.get("dropout", 0):
+            layers.append(tf.keras.layers.Dropout(config["dropout"]))
+    if config["architecture"] == "dnn":
+        layers.append(tf.keras.layers.Dense(32, activation="relu"))
+        if config.get("dropout", 0):
+            layers.append(tf.keras.layers.Dropout(config["dropout"]))
     layers.append(tf.keras.layers.Dense(1))
-    model=tf.keras.Sequential(layers)
-    optimizer={'sgd':tf.keras.optimizers.SGD,'adam':tf.keras.optimizers.Adam,'rmsprop':tf.keras.optimizers.RMSprop}[config['optimizer']](learning_rate=config['learning_rate'])
-    model.compile(optimizer=optimizer,loss=config['loss'],metrics=[tf.keras.metrics.MeanAbsoluteError(name='mae')])
+    model = tf.keras.Sequential(layers)
+    optimizer_types = {"sgd": tf.keras.optimizers.SGD, "adam": tf.keras.optimizers.Adam, "rmsprop": tf.keras.optimizers.RMSprop}
+    optimizer = optimizer_types[config["optimizer"]](learning_rate=config["learning_rate"])
+    model.compile(optimizer=optimizer, loss=config["loss"], metrics=[tf.keras.metrics.MeanAbsoluteError(name="mae")], steps_per_execution=64)
     return model
 
 
-def fit_tensorflow(config: dict, inputs: dict[str,np.ndarray], targets: dict[str,np.ndarray], root: Path, fingerprint: str) -> dict:
-    """Train a 100-epoch run, checkpoint by validation MAE and save all loss curves.
-
-    A numerically failed run is recorded as failed, never as a completed run.
-    The test arrays are not accessed. Existing successful runs can be resumed
-    only when the data fingerprint and complete configuration agree.
-    """
+def fit_tensorflow(config: dict, inputs: dict[str, np.ndarray], targets: dict[str, np.ndarray], features: list[str], root: Path) -> dict:
+    """Fit 100 epochs and cache only matching configurations, features, and input widths."""
     import tensorflow as tf
     import matplotlib.pyplot as plt
-    assert config['epochs']==100 and config['batch_size']==32
-    import inspect
-    definition_hash=hashlib.sha256((inspect.getsource(build_tensorflow)+inspect.getsource(prepare_inputs)).encode()).hexdigest()
-    identity=hashlib.sha256(json.dumps({'config':config,'data':fingerprint},sort_keys=True).encode()).hexdigest()[:12]
-    run_id=f"{config['architecture']}_{config['loss']}_{config['optimizer']}_{config['learning_rate']}_{identity}"
-    folder=root/'outputs/runs'/run_id;folder.mkdir(parents=True,exist_ok=True)
-    result_path=folder/'result.json'
+    config = {key: value.item() if isinstance(value, np.generic) else value for key, value in config.items()}
+    assert config["epochs"] == 100 and config["batch_size"] == 32
+    folder = root / "outputs/runs" / run_identifier(config)
+    folder.mkdir(parents=True, exist_ok=True)
+    result_path = folder / "result.json"
+    width = inputs["train"].shape[1]
+    context = {"training_rows": len(targets["train"]), "validation_rows": len(targets["validation"]), "period": "2020-01 through 2020-11", "sample_seed": SEED}
     if result_path.exists():
-        existing=json.loads(result_path.read_text())
-        if existing.get('status')=='complete' and existing.get('definition_hash')==definition_hash:return existing
-    config={k:(v.item() if isinstance(v,np.generic) else v) for k,v in config.items()}
-    result={'run_id':run_id,**config,'hardware':('GPU' if tf.config.list_physical_devices('GPU') else 'CPU'),'data_fingerprint':fingerprint,'definition_hash':definition_hash,'status':'running'}
-    result_path.write_text(json.dumps(result,indent=2))
-    start=time.perf_counter();history=None
+        cached = json.loads(result_path.read_text())
+        matches = cached.get("config") == config and cached.get("input_width") == width and cached.get("feature_list") == features and cached.get("data_context") == context
+        if matches and cached.get("status") in ["complete", "failed"]:
+            return cached
+    result = {"run_id": folder.name, "config": config, **config, "input_width": width,
+              "feature_list": features, "data_context": context, "status": "running"}
+    result_path.write_text(json.dumps(result, indent=2))
+    started = time.perf_counter()
+    history = None
     try:
         tf.keras.backend.clear_session()
-        model=build_tensorflow(config,inputs['train'].shape[1])
-        options=tf.data.Options();options.threading.private_threadpool_size=1
-        training=tf.data.Dataset.from_tensor_slices((inputs['train'],targets['train'])).shuffle(len(targets['train']),seed=config['seed']).batch(32).with_options(options)
-        validation=tf.data.Dataset.from_tensor_slices((inputs['validation'],targets['validation'])).batch(32).with_options(options)
-        checkpoint=folder/'best.weights.h5'
-        model.steps_per_execution=64
-        history=model.fit(training,validation_data=validation,epochs=100,verbose=0,shuffle=False,callbacks=[
-            tf.keras.callbacks.ModelCheckpoint(checkpoint,monitor='val_mae',mode='min',save_best_only=True,save_weights_only=True),
-            tf.keras.callbacks.TerminateOnNaN(),
-        ])
-        curves=pd.DataFrame(history.history);curves.index=np.arange(1,len(curves)+1);curves.index.name='epoch'
-        curves.to_csv(folder/'history.csv')
-        fig,ax=plt.subplots(figsize=(7,4))
-        ax.plot(curves.index,curves.loss,label='Training loss');ax.plot(curves.index,curves.val_loss,label='Validation loss')
-        ax.set(xlabel='Epoch',ylabel=f"{config['loss'].upper()} ({'minutes squared' if config['loss']=='mse' else 'minutes'})",title=f"{config['architecture'].upper()} | {config['loss'].upper()} | {config['optimizer']} lr={config['learning_rate']}")
-        ax.legend();fig.tight_layout();fig.savefig(folder/'loss.png',dpi=140);plt.close(fig)
-        if len(curves)!=100 or not np.isfinite(curves[['loss','val_loss']].to_numpy()).all():
-            raise ValueError('Numerical failure: this run did not complete 100 finite epochs')
-        model.load_weights(checkpoint)
-        prediction=model.predict(validation,verbose=0).reshape(-1)
-        result.update(status='complete',epochs_completed=100,best_epoch=int(curves.val_mae.idxmin()),final_epoch_validation_mae_minutes=float(curves.val_mae.iloc[-1]),
-                      **{'validation_'+k:v for k,v in metrics(targets['validation'],prediction).items()})
-        model.save(folder/'best.keras')
-        np.save(folder/'validation_predictions.npy',prediction)
-    except Exception as exc:
-        result.update(status='failed',error=f'{type(exc).__name__}: {exc}',epochs_completed=0 if history is None else len(history.epoch))
-    result['seconds']=time.perf_counter()-start
-    result_path.write_text(json.dumps(result,indent=2))
+        model = build_tensorflow(config, width)
+        options = tf.data.Options()
+        options.threading.private_threadpool_size = 1
+        training = tf.data.Dataset.from_tensor_slices((inputs["train"], targets["train"]))
+        training = training.shuffle(len(targets["train"]), seed=config["seed"]).batch(32).with_options(options)
+        validation = tf.data.Dataset.from_tensor_slices((inputs["validation"], targets["validation"])).batch(32).with_options(options)
+        callbacks = [tf.keras.callbacks.ModelCheckpoint(folder / "best.weights.h5", monitor="val_mae", mode="min", save_best_only=True, save_weights_only=True),
+                     tf.keras.callbacks.TerminateOnNaN()]
+        history = model.fit(training, validation_data=validation, epochs=100, shuffle=False, callbacks=callbacks, verbose=0)
+        curves = pd.DataFrame(history.history)
+        curves.index = np.arange(1, len(curves) + 1)
+        curves.index.name = "epoch"
+        curves.to_csv(folder / "history.csv")
+        figure, axis = plt.subplots(figsize=(7, 4))
+        axis.plot(curves.index, curves["loss"], label="Training loss")
+        axis.plot(curves.index, curves["val_loss"], label="Validation loss")
+        axis.set(xlabel="Epoch", ylabel=config["loss"].upper(), title=f"{config['architecture'].upper()} | {config['optimizer']} | lr={config['learning_rate']}")
+        axis.legend()
+        figure.tight_layout()
+        figure.savefig(folder / "loss.png", dpi=130)
+        plt.close(figure)
+        if len(curves) != 100 or not np.isfinite(curves[["loss", "val_loss"]]).all().all():
+            raise ValueError("Numerical divergence; this run did not complete 100 finite epochs")
+        model.load_weights(folder / "best.weights.h5")
+        predictions = model.predict(validation, verbose=0).reshape(-1)
+        np.save(folder / "validation_predictions.npy", predictions)
+        model.save(folder / "best.keras")
+        result.update(duration_metrics(targets["validation"], predictions))
+        result.update(status="complete", epochs_completed=100, best_epoch=int(curves["val_mae"].idxmin()),
+                      final_epoch_validation_mae=float(curves["val_mae"].iloc[-1]), final_epoch_training_loss=float(curves["loss"].iloc[-1]),
+                      best_epoch_training_loss=float(curves.loc[curves["val_mae"].idxmin(), "loss"]))
+    except Exception as error:
+        result.update(status="failed", error=f"{type(error).__name__}: {error}", epochs_completed=0 if history is None else len(history.epoch))
+    result["seconds"] = time.perf_counter() - started
+    result_path.write_text(json.dumps(result, indent=2))
     return result
 
 
 def collect_results(root: Path) -> pd.DataFrame:
-    """Collect genuine logged run results; absent experiments are never fabricated."""
-    result=pd.DataFrame([json.loads(p.read_text()) for p in (root/'outputs/runs').glob('*/result.json')])
-    if not result.empty:
-        if 'validation_mae_minutes' in result:result=result.sort_values('validation_mae_minutes')
-        result.to_csv(root/'reports/experiment_results.csv',index=False)
-    return result
+    """Collect only current-feature runs; archived runs are outside this directory."""
+    records = [json.loads(path.read_text()) for path in (root / "outputs/runs").glob("*/result.json")]
+    table = pd.DataFrame(records)
+    if not table.empty:
+        table.to_csv(root / "reports/experiment_results.csv", index=False)
+    return table
 
 
+def error_analysis(frame: pd.DataFrame, predictions: np.ndarray, root: Path) -> dict[str, pd.DataFrame]:
+    """Save large errors and distance/hour/rain subgroup MAE without dropping trips."""
+    review = frame[["row_id", "pickup_utc", "dropoff_utc", "trip_distance", "pickup_hour", "rain", "snowfall", "precipitation", TARGET]].copy()
+    review["prediction"] = predictions
+    review["absolute_error"] = np.abs(review[TARGET] - predictions)
+    review["distance_bucket"] = pd.cut(review["trip_distance"], [-np.inf, 0, 1, 3, 5, 10, 20, np.inf], labels=["<=0", "0-1", "1-3", "3-5", "5-10", "10-20", ">20"])
+    rain_group = np.select([review[["rain", "snowfall", "precipitation"]].isna().any(axis=1), review["rain"].gt(0), review["precipitation"].eq(0)],
+                           ["unknown", "rain", "dry"], default="snow_or_other")
+    review["rain_group"] = rain_group
+    review["distance_bucket"] = review["distance_bucket"].astype(object).fillna("unknown")
+    outputs = {}
+    for name, column in [("distance", "distance_bucket"), ("hour", "pickup_hour"), ("rain", "rain_group")]:
+        outputs[name] = review.groupby(column, observed=False)["absolute_error"].agg(trips="size", mae_minutes="mean")
+        if name == "hour":
+            outputs[name] = outputs[name].sort_index(key=lambda values: values.astype(int))
+        outputs[name].to_csv(root / "reports" / f"error_by_{name}.csv")
+    outputs["largest_errors"] = review.nlargest(20, "absolute_error")
+    outputs["largest_errors"].to_csv(root / "reports/largest_20_errors.csv", index=False)
+    return outputs
 
 
-def fit_pytorch(config: dict, inputs: dict[str,np.ndarray], targets: dict[str,np.ndarray], root: Path) -> dict:
-    """Train the extra-credit 64/32 DNN for 100 epochs with the same input arrays.
+def save_prediction_plots(actual: np.ndarray, predicted: np.ndarray, root: Path) -> None:
+    """Save focused actual/predicted and all-row residual plots."""
+    import matplotlib.pyplot as plt
+    figure, axes = plt.subplots(1, 2, figsize=(11, 4))
+    limit = max(1.0, float(np.quantile(actual, 0.99)))
+    axes[0].scatter(actual, predicted, s=7, alpha=0.15)
+    axes[0].plot([0, limit], [0, limit], "k--")
+    axes[0].set(xlim=(0, limit), ylim=(0, limit), xlabel="Actual minutes", ylabel="Predicted minutes", title="Focused axes: 99th percentile of actual duration")
+    axes[1].hist(predicted - actual, bins=80)
+    axes[1].set(xlabel="Prediction minus actual (minutes)", ylabel="Trips", title="Residuals: all validation trips")
+    figure.tight_layout()
+    figure.savefig(root / "reports/predictions.png", dpi=130)
+    plt.close(figure)
 
-    Save the validation-MAE checkpoint and training/validation loss. Test arrays
-    are not accessed. Matching seeds do not imply identical framework results.
-    """
+
+def fit_pytorch(config: dict, inputs: dict[str, np.ndarray], targets: dict[str, np.ndarray], features: list[str], root: Path) -> dict:
+    """Train the matching 64/32 PyTorch DNN for 100 epochs and retain its best checkpoint."""
     import torch
     import matplotlib.pyplot as plt
-    config={k:(v.item() if isinstance(v,np.generic) else v) for k,v in config.items()}
-    assert config['architecture']=='dnn' and config['epochs']==100 and config['batch_size']==32
-    torch.manual_seed(config['seed']);torch.set_num_threads(2)
-    device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model=torch.nn.Sequential(torch.nn.Linear(inputs['train'].shape[1],64),torch.nn.ReLU(),torch.nn.Linear(64,32),torch.nn.ReLU(),torch.nn.Linear(32,1)).to(device)
-    optimizer={'sgd':torch.optim.SGD,'adam':torch.optim.Adam,'rmsprop':torch.optim.RMSprop}[config['optimizer']](model.parameters(),lr=config['learning_rate'])
-    # RMSprop defaults differ: match Keras rho=.9 and epsilon=1e-7; Adam epsilon too.
-    if config['optimizer']=='rmsprop':optimizer=torch.optim.RMSprop(model.parameters(),lr=config['learning_rate'],alpha=.9,eps=1e-7)
-    elif config['optimizer']=='adam':optimizer=torch.optim.Adam(model.parameters(),lr=config['learning_rate'],eps=1e-7)
-    loss_fn=torch.nn.MSELoss() if config['loss']=='mse' else torch.nn.L1Loss()
-    x=torch.from_numpy(inputs['train']);y=torch.from_numpy(targets['train']).reshape(-1,1)
-    xv=torch.from_numpy(inputs['validation']).to(device);yv=torch.from_numpy(targets['validation']).reshape(-1,1).to(device)
-    loader=torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x,y),batch_size=32,shuffle=True,generator=torch.Generator().manual_seed(config['seed']))
-    folder=root/'outputs/pytorch';folder.mkdir(exist_ok=True)
-    best=float('inf');history=[];start=time.perf_counter()
+    config = {key: value.item() if isinstance(value, np.generic) else value for key, value in config.items()}
+    torch.manual_seed(config["seed"])
+    torch.set_num_threads(2)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    folder = root / "outputs/pytorch"
+    folder.mkdir(exist_ok=True)
+    result_path = folder / "result.json"
+    if result_path.exists():
+        cached = json.loads(result_path.read_text())
+        if cached.get("config") == config and cached.get("input_width") == inputs["train"].shape[1] and cached.get("feature_list") == features and cached.get("epochs_completed") == 100:
+            return cached
+    model = torch.nn.Sequential(torch.nn.Linear(inputs["train"].shape[1], 64), torch.nn.ReLU(), torch.nn.Linear(64, 32), torch.nn.ReLU(), torch.nn.Linear(32, 1)).to(device)
+    if config["optimizer"] == "adam":
+        optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"], eps=1e-7)
+    elif config["optimizer"] == "rmsprop":
+        optimizer = torch.optim.RMSprop(model.parameters(), lr=config["learning_rate"], alpha=0.9, eps=1e-7)
+    else:
+        optimizer = torch.optim.SGD(model.parameters(), lr=config["learning_rate"])
+    criterion = torch.nn.L1Loss() if config["loss"] == "mae" else torch.nn.MSELoss()
+    training_x = torch.from_numpy(inputs["train"])
+    training_y = torch.from_numpy(targets["train"]).reshape(-1, 1)
+    validation_x = torch.from_numpy(inputs["validation"]).to(device)
+    validation_y = torch.from_numpy(targets["validation"]).reshape(-1, 1).to(device)
+    loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(training_x, training_y), batch_size=32, shuffle=True,
+                                        generator=torch.Generator().manual_seed(config["seed"]))
+    best_mae = float("inf")
+    records = []
+    started = time.perf_counter()
     for epoch in range(100):
-        model.train();total=0.
-        for xb,yb in loader:
-            xb=xb.to(device);yb=yb.to(device)
-            optimizer.zero_grad();prediction=model(xb);loss=loss_fn(prediction,yb)
-            if not torch.isfinite(loss):raise ValueError('PyTorch numerical failure; run incomplete')
-            loss.backward();optimizer.step();total+=float(loss.detach())*len(xb)
+        model.train()
+        total_loss = 0.0
+        for batch_x, batch_y in loader:
+            batch_x = batch_x.to(device)
+            batch_y = batch_y.to(device)
+            optimizer.zero_grad()
+            loss = criterion(model(batch_x), batch_y)
+            if not torch.isfinite(loss):
+                raise ValueError("PyTorch numerical divergence")
+            loss.backward()
+            optimizer.step()
+            total_loss += float(loss.detach()) * len(batch_x)
         model.eval()
         with torch.no_grad():
-            prediction=model(xv);val_loss=float(loss_fn(prediction,yv));val_mae=float(torch.mean(torch.abs(prediction-yv)))
-        history.append({'epoch':epoch+1,'loss':total/len(y),'val_loss':val_loss,'val_mae':val_mae})
-        if val_mae<best:best=val_mae;torch.save(model.state_dict(),folder/'best.pt')
-    model.load_state_dict(torch.load(folder/'best.pt',weights_only=True,map_location=device));model.eval()
-    with torch.no_grad():prediction=model(xv).cpu().numpy().reshape(-1)
-    curves=pd.DataFrame(history);curves.to_csv(folder/'history.csv',index=False)
-    fig,ax=plt.subplots(figsize=(7,4));ax.plot(curves.epoch,curves.loss,label='Training loss');ax.plot(curves.epoch,curves.val_loss,label='Validation loss');ax.legend();ax.set(xlabel='Epoch',ylabel=config['loss'].upper(),title='PyTorch extra-credit DNN');fig.tight_layout();fig.savefig(folder/'loss.png',dpi=140);plt.close(fig)
-    result={'framework':'pytorch','hardware':str(device),**config,'epochs_completed':100,'seconds':time.perf_counter()-start,**metrics(targets['validation'],prediction)}
-    (folder/'result.json').write_text(json.dumps(result,indent=2))
+            predicted = model(validation_x)
+            validation_loss = float(criterion(predicted, validation_y))
+            validation_mae = float(torch.abs(predicted - validation_y).mean())
+        records.append({"epoch": epoch + 1, "loss": total_loss / len(training_y), "val_loss": validation_loss, "val_mae": validation_mae})
+        if validation_mae < best_mae:
+            best_mae = validation_mae
+            torch.save(model.state_dict(), folder / "best.pt")
+    model.load_state_dict(torch.load(folder / "best.pt", weights_only=True, map_location=device))
+    model.eval()
+    with torch.no_grad():
+        predictions = model(validation_x).cpu().numpy().reshape(-1)
+    np.save(folder / "validation_predictions.npy", predictions)
+    history = pd.DataFrame(records)
+    history.to_csv(folder / "history.csv", index=False)
+    figure, axis = plt.subplots(figsize=(7, 4))
+    axis.plot(history["epoch"], history["loss"], label="Training loss")
+    axis.plot(history["epoch"], history["val_loss"], label="Validation loss")
+    axis.set(xlabel="Epoch", ylabel=config["loss"].upper(), title="PyTorch DNN")
+    axis.legend()
+    figure.tight_layout()
+    figure.savefig(folder / "loss.png", dpi=130)
+    plt.close(figure)
+    result = {"framework": "PyTorch", "config": config, "feature_list": features, "input_width": inputs["train"].shape[1],
+              "epochs_completed": 100, "best_epoch": int(history["val_mae"].idxmin()) + 1, "seconds": time.perf_counter() - started,
+              **duration_metrics(targets["validation"], predictions)}
+    result_path.write_text(json.dumps(result, indent=2))
     return result
-
-
-def save_error_plots(actual: np.ndarray, predicted: np.ndarray, folder: Path, prefix: str) -> None:
-    """Save actual/predicted and residual plots; any focused axes are explicitly labeled."""
-    import matplotlib.pyplot as plt
-    actual=np.asarray(actual).reshape(-1);predicted=np.asarray(predicted).reshape(-1)
-    residual=predicted-actual
-    fig,axes=plt.subplots(1,2,figsize=(11,4))
-    limit=max(1.,float(np.quantile(actual,.99)))
-    axes[0].scatter(actual,predicted,s=7,alpha=.15)
-    axes[0].plot([0,limit],[0,limit],color='black',linestyle='--')
-    axes[0].set(xlim=(0,limit),ylim=(0,limit),xlabel='Actual minutes',ylabel='Predicted minutes',title='Focused display: actual-duration 99th percentile')
-    axes[1].hist(residual,bins=80)
-    axes[1].set(xlabel='Prediction minus actual (minutes)',ylabel='Trips',title='Residuals: all evaluation rows')
-    fig.suptitle('Display limits do not remove rows from the error metrics')
-    fig.tight_layout();folder.mkdir(parents=True,exist_ok=True);fig.savefig(folder/f'{prefix}_errors.png',dpi=140);plt.close(fig)
-
-
-def split_assignment(frame: pd.DataFrame, root: Path) -> dict[str,pd.DataFrame]:
-    """Split January-November trips chronologically, targeting 80%/20% without future labels.
-
-    Whole-hour grouping prevents shared weather timestamps across partitions.
-    Rides crossing the validation boundary remain in the source audit but are
-    excluded from the training view. Exact realized counts are reported.
-    """
-    frame=frame.sort_values('pickup_utc')
-    boundary=frame.pickup_utc.iloc[int(len(frame)*.8)].ceil('h')
-    before=frame.loc[frame.pickup_utc.lt(boundary)]
-    train=before.loc[before.dropoff_utc.lt(boundary)].copy()
-    validation=frame.loc[frame.pickup_utc.ge(boundary)].copy()
-    assert train.dropoff_utc.max()<validation.pickup_utc.min()
-    assert set(train.weather_time_utc).isdisjoint(validation.weather_time_utc)
-    result={'modeling_period':'January-November 2020','target_ratio':'80/20',
-            'validation_start_local':str(boundary.tz_convert('America/New_York')),
-            'train':len(train),'validation':len(validation),'boundary_overlap_excluded_from_training_view':len(before)-len(train),
-            'training_percent':100*len(train)/(len(train)+len(validation)),'source_rows_deleted':0}
-    (root/'reports').mkdir(exist_ok=True)
-    (root/'reports/split_assignment.json').write_text(json.dumps(result,indent=2))
-    return {'train':train,'validation':validation}
