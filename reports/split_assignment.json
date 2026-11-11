@@ -1,0 +1,10 @@
+{
+  "modeling_period": "January-November 2020",
+  "target_ratio": "80/20",
+  "validation_start_local": "2020-08-28 01:00:00-04:00",
+  "train": 39999,
+  "validation": 9999,
+  "boundary_overlap_excluded_from_training_view": 2,
+  "training_percent": 80.00120004800192,
+  "source_rows_deleted": 0
+}

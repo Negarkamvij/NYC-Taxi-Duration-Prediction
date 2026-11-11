@@ -10,7 +10,7 @@ import pandas as pd
 
 SEED = 672
 WEATHER = ['temperature_2m','relative_humidity_2m','precipitation','rain','snowfall','wind_speed_10m','surface_pressure']
-NUMERIC = ['passenger_count','days_since_year_start']
+NUMERIC = ['passenger_count','log_trip_distance','days_since_year_start']
 CATEGORICAL = ['pickup_zone','destination_zone','pickup_hour','pickup_weekday','pickup_month']
 TARGET = 'duration_minutes'
 
@@ -90,18 +90,17 @@ def local_utc(values: pd.Series) -> pd.Series:
     return pd.to_datetime(values,errors='coerce').dt.tz_localize('America/New_York',ambiguous='NaT',nonexistent='NaT').dt.tz_convert('UTC')
 
 
-def prepare_sample(root: Path, weather: pd.DataFrame, sample_size: int = 50000, test_size: int = 10000) -> pd.DataFrame:
+def prepare_sample(root: Path, weather: pd.DataFrame, sample_size: int = 50000) -> pd.DataFrame:
     """Audit every monthly source row and uniformly sample eligible trips.
 
-    Jan-Nov form one uniform-priority sample; December forms a separate uniform
-    test sample. Original files stay intact. Unknown zones remain categories.
+    January-November form one uniform-priority modeling sample. Original files stay intact. Unknown zones remain categories.
     Eligibility requires valid UTC times, positive duration and intended month;
-    long rides are flagged but not discarded by a duration or distance threshold.
+    long rides are flagged but not discarded by a duration or distance threshold. Recorded distance is used in this offline regression; live use would require an estimated route distance.
     """
     report=root/'reports';report.mkdir(exist_ok=True)
     pool=pd.DataFrame();test=pd.DataFrame();audits=[];manifest=[]
     cols=['tpep_pickup_datetime','tpep_dropoff_datetime','PULocationID','DOLocationID','passenger_count','trip_distance']
-    for month in range(1,13):
+    for month in range(1,12):
         name=f'yellow_tripdata_2020-{month:02d}.parquet'
         path=download_file('https://d37ci6vzurychx.cloudfront.net/trip-data/'+name,root/'data'/name)
         raw=pd.read_parquet(path,columns=cols)
@@ -118,21 +117,20 @@ def prepare_sample(root: Path, weather: pd.DataFrame, sample_size: int = 50000, 
         audits.append(audit)
         # Random priorities do not depend on trip duration or weather.
         priority=np.random.default_rng(SEED+month).random(len(raw))
-        indices=np.flatnonzero(valid.to_numpy());cap=test_size if month==12 else sample_size
+        indices=np.flatnonzero(valid.to_numpy());cap=sample_size
         if len(indices)>cap:
             indices=indices[np.argpartition(priority[indices],cap-1)[:cap]]
         candidate=pd.DataFrame({'row_id':[f'{month:02d}:{i}' for i in indices],
                                 'pickup_utc':pickup.iloc[indices].to_numpy(),'dropoff_utc':dropoff.iloc[indices].to_numpy(),
                                 TARGET:duration.iloc[indices].to_numpy(),'priority':priority[indices],
-                                'passenger_count':raw.passenger_count.iloc[indices].to_numpy()})
+                                'passenger_count':raw.passenger_count.iloc[indices].to_numpy(),
+                                'trip_distance':raw.trip_distance.iloc[indices].to_numpy()})
         for source,dest in [('PULocationID','pickup_zone'),('DOLocationID','destination_zone')]:
             zones=raw[source].iloc[indices]
             candidate[dest]=zones.where(zones.between(1,263)&zones.mod(1).eq(0),0).fillna(0).astype(int).astype(str).to_numpy()
         candidate['passenger_count']=candidate.passenger_count.where(candidate.passenger_count.ge(0))
-        if month==12:
-            test=candidate
-        else:
-            pool=pd.concat([pool,candidate],ignore_index=True).nsmallest(sample_size,'priority')
+        candidate['log_trip_distance']=np.log1p(candidate.trip_distance.where(candidate.trip_distance.ge(0)&np.isfinite(candidate.trip_distance)))
+        pool=pd.concat([pool,candidate],ignore_index=True).nsmallest(sample_size,'priority')
         manifest.append({'month':month,'file':name,'sha256':file_hash(path),'source_rows':len(raw),'eligible_rows':int(valid.sum())})
         print(f'Month {month:02d}: {len(raw):,} source rows, {int(valid.sum()):,} eligible; source rows removed: 0',flush=True)
         del raw,pickup,dropoff,duration,priority,local
@@ -152,45 +150,12 @@ def prepare_sample(root: Path, weather: pd.DataFrame, sample_size: int = 50000, 
     frame['pickup_month']=local.dt.month.astype(str)
     frame['days_since_year_start']=(local.dt.tz_localize(None)-pd.Timestamp('2020-01-01')).dt.total_seconds()/86400
     pd.DataFrame(audits).to_csv(report/'source_audit_2020.csv',index=False)
-    (report/'data_manifest_2020.json').write_text(json.dumps({'seed':SEED,'sample_size_jan_nov':len(pool),'sample_size_december':len(test),'sampling':'Uniform random priorities over eligible source rows, not equal monthly quotas','files':manifest},indent=2))
+    (report/'data_manifest_2020.json').write_text(json.dumps({'seed':SEED,'sample_size':len(pool),'modeling_period':'January-November 2020','sampling':'Uniform random priorities over eligible source rows, not equal monthly quotas','files':manifest},indent=2))
     (root/'outputs').mkdir(exist_ok=True)
-    frame.to_parquet(root/'outputs/model_sample.parquet',index=False)
+    frame.to_parquet(root/'outputs/assignment_sample.parquet',index=False)
     return frame
 
 
-def split_by_time(frame: pd.DataFrame, root: Path) -> dict[str,pd.DataFrame]:
-    """Make an approximately 80/20 Jan-Nov split and hold December for final test.
-
-    Whole-hour boundaries prevent the same weather hour appearing in both sets.
-    Purge earlier rides that finish across the next period's boundary. Source
-    rows remain untouched; the exact split and exclusions are reported.
-    """
-    final_start=pd.Timestamp('2020-12-01',tz='America/New_York').tz_convert('UTC')
-    development=frame.loc[frame.pickup_utc.lt(final_start)].sort_values('pickup_utc')
-    boundary=development.pickup_utc.iloc[int(len(development)*.8)].ceil('h')
-    train_before=development.loc[development.pickup_utc.lt(boundary)]
-    validation_before=development.loc[development.pickup_utc.ge(boundary)]
-    splits={'train':train_before.loc[train_before.dropoff_utc.lt(boundary)].copy(),
-            'validation':validation_before.loc[validation_before.dropoff_utc.lt(final_start)].copy(),
-            'test':frame.loc[frame.pickup_utc.ge(final_start)].copy()}
-    assert splits['train'].dropoff_utc.max()<splits['validation'].pickup_utc.min()
-    assert splits['validation'].dropoff_utc.max()<splits['test'].pickup_utc.min()
-    assert set(splits['train'].weather_time_utc).isdisjoint(splits['validation'].weather_time_utc)
-    assert set(splits['validation'].weather_time_utc).isdisjoint(splits['test'].weather_time_utc)
-    summary={'validation_start_local':str(boundary.tz_convert('America/New_York')),'test_start_local':str(final_start.tz_convert('America/New_York')),
-             'train':len(splits['train']),'validation':len(splits['validation']),'test':len(splits['test']),
-             'train_boundary_purged':len(train_before)-len(splits['train']),
-             'validation_boundary_purged':len(validation_before)-len(splits['validation']),
-             'training_share_after_purge':len(splits['train'])/(len(splits['train'])+len(splits['validation']))}
-    report=root/'reports';(report/'split_2020.json').write_text(json.dumps(summary,indent=2))
-    exposure=[]
-    for name,part in splits.items():
-        for category,group in part.groupby('weather_class'):
-            exposure.append({'split':name,'weather_class':category,'taxi_rows':len(group),
-                             'distinct_hours':group.weather_time_utc.nunique(),
-                             'distinct_days':group.pickup_utc.dt.tz_convert('America/New_York').dt.date.nunique()})
-    pd.DataFrame(exposure).to_csv(report/'split_weather_2020.csv',index=False)
-    return splits
 
 
 def prepare_inputs(splits: dict[str,pd.DataFrame], with_weather: bool = True) -> tuple[object,dict[str,np.ndarray],dict[str,np.ndarray]]:
@@ -198,13 +163,13 @@ def prepare_inputs(splits: dict[str,pd.DataFrame], with_weather: bool = True) ->
     from sklearn.compose import ColumnTransformer
     from sklearn.impute import SimpleImputer
     from sklearn.pipeline import Pipeline
-    from sklearn.preprocessing import StandardScaler,OneHotEncoder
+    from sklearn.preprocessing import MinMaxScaler,OneHotEncoder
     numeric=NUMERIC+(WEATHER if with_weather else [])
     # Fixed calendar/zone domains are public definitions, not validation-derived vocabularies.
     categories=[[str(i) for i in range(264)],[str(i) for i in range(264)],
                 [str(i) for i in range(24)],[str(i) for i in range(7)],[str(i) for i in range(1,13)]]
     preprocessing=ColumnTransformer([
-        ('numeric',Pipeline([('missing',SimpleImputer(strategy='median',add_indicator=True,keep_empty_features=True)),('scale',StandardScaler())]),numeric),
+        ('numeric',Pipeline([('missing',SimpleImputer(strategy='median',add_indicator=True,keep_empty_features=True)),('scale',MinMaxScaler(feature_range=(0,1),clip=True))]),numeric),
         ('category',OneHotEncoder(categories=categories,handle_unknown='ignore',sparse_output=False,dtype=np.float32),CATEGORICAL),
     ],sparse_threshold=0)
     preprocessing.fit(splits['train'])
@@ -225,18 +190,6 @@ def metrics(actual: np.ndarray, predicted: np.ndarray) -> dict[str,float]:
             'negative_prediction_count':int((predicted<0).sum())}
 
 
-def baseline_results(splits: dict[str,pd.DataFrame], root: Path) -> pd.DataFrame:
-    """Evaluate two training-only baselines on validation, leaving test labels unused."""
-    train=splits['train'];validation=splits['validation'];median=float(train[TARGET].median())
-    routes=train.groupby(['pickup_zone','destination_zone'])[TARGET].agg(['median','count'])
-    trusted=routes.loc[routes['count'].ge(20),'median']
-    keys=pd.MultiIndex.from_frame(validation[['pickup_zone','destination_zone']])
-    route_prediction=pd.Series(trusted.reindex(keys).to_numpy()).fillna(median).to_numpy()
-    results=[]
-    for name,pred in [('training_median',np.full(len(validation),median)),('training_route_median_min20',route_prediction)]:
-        results.append({'model':name,'split':'validation',**metrics(validation[TARGET].to_numpy(),pred)})
-    result=pd.DataFrame(results);result.to_csv(root/'reports/validation_baselines.csv',index=False)
-    return result
 
 
 def experiment_grid() -> list[dict]:
@@ -292,6 +245,7 @@ def fit_tensorflow(config: dict, inputs: dict[str,np.ndarray], targets: dict[str
         training=tf.data.Dataset.from_tensor_slices((inputs['train'],targets['train'])).shuffle(len(targets['train']),seed=config['seed']).batch(32).with_options(options)
         validation=tf.data.Dataset.from_tensor_slices((inputs['validation'],targets['validation'])).batch(32).with_options(options)
         checkpoint=folder/'best.weights.h5'
+        model.steps_per_execution=64
         history=model.fit(training,validation_data=validation,epochs=100,verbose=0,shuffle=False,callbacks=[
             tf.keras.callbacks.ModelCheckpoint(checkpoint,monitor='val_mae',mode='min',save_best_only=True,save_weights_only=True),
             tf.keras.callbacks.TerminateOnNaN(),
@@ -300,7 +254,7 @@ def fit_tensorflow(config: dict, inputs: dict[str,np.ndarray], targets: dict[str
         curves.to_csv(folder/'history.csv')
         fig,ax=plt.subplots(figsize=(7,4))
         ax.plot(curves.index,curves.loss,label='Training loss');ax.plot(curves.index,curves.val_loss,label='Validation loss')
-        ax.set(xlabel='Epoch',ylabel=f"{config['loss'].upper()} ({'minutes squared' if config['loss']=='mse' else 'minutes'})",title=run_id)
+        ax.set(xlabel='Epoch',ylabel=f"{config['loss'].upper()} ({'minutes squared' if config['loss']=='mse' else 'minutes'})",title=f"{config['architecture'].upper()} | {config['loss'].upper()} | {config['optimizer']} lr={config['learning_rate']}")
         ax.legend();fig.tight_layout();fig.savefig(folder/'loss.png',dpi=140);plt.close(fig)
         if len(curves)!=100 or not np.isfinite(curves[['loss','val_loss']].to_numpy()).all():
             raise ValueError('Numerical failure: this run did not complete 100 finite epochs')
@@ -326,26 +280,6 @@ def collect_results(root: Path) -> pd.DataFrame:
     return result
 
 
-def evaluate_selected(root: Path, result: dict, inputs: dict[str,np.ndarray], targets: dict[str,np.ndarray], splits: dict[str,pd.DataFrame]) -> pd.DataFrame:
-    """Evaluate a frozen selected model on December once; cache and flag any prior test access.
-
-    Call only after all required validation experiments and weather ablation.
-    Never use this report to tune parameters and then call it an untouched test.
-    """
-    import tensorflow as tf
-    marker=root/'reports/final_test_metrics.json'
-    if marker.exists():raise RuntimeError('December was already evaluated. Keep the original report; further tuning is exploratory.')
-    model=tf.keras.models.load_model(root/'outputs/runs'/result['run_id']/'best.keras')
-    prediction=model.predict(inputs['test'],batch_size=32,verbose=0).reshape(-1)
-    save_error_plots(targets['test'],prediction,root/'outputs','final_test')
-    report={'selected_run_id':result['run_id'],'test_period':'December 2020',**metrics(targets['test'],prediction)}
-    marker.write_text(json.dumps(report,indent=2))
-    frame=splits['test'][['row_id','pickup_utc','weather_time_utc','weather_class',TARGET]].copy()
-    frame['predicted_minutes']=prediction;frame['absolute_error']=np.abs(frame[TARGET]-prediction)
-    frame.to_parquet(root/'outputs/final_test_predictions.parquet',index=False)
-    grouped=frame.groupby('weather_class').agg(trips=(TARGET,'size'),weather_hours=('weather_time_utc','nunique'),mae_minutes=('absolute_error','mean'))
-    grouped.to_csv(root/'reports/final_test_weather_errors.csv')
-    return grouped
 
 
 def fit_pytorch(config: dict, inputs: dict[str,np.ndarray], targets: dict[str,np.ndarray], root: Path) -> dict:
@@ -406,3 +340,26 @@ def save_error_plots(actual: np.ndarray, predicted: np.ndarray, folder: Path, pr
     axes[1].set(xlabel='Prediction minus actual (minutes)',ylabel='Trips',title='Residuals: all evaluation rows')
     fig.suptitle('Display limits do not remove rows from the error metrics')
     fig.tight_layout();folder.mkdir(parents=True,exist_ok=True);fig.savefig(folder/f'{prefix}_errors.png',dpi=140);plt.close(fig)
+
+
+def split_assignment(frame: pd.DataFrame, root: Path) -> dict[str,pd.DataFrame]:
+    """Split January-November trips chronologically, targeting 80%/20% without future labels.
+
+    Whole-hour grouping prevents shared weather timestamps across partitions.
+    Rides crossing the validation boundary remain in the source audit but are
+    excluded from the training view. Exact realized counts are reported.
+    """
+    frame=frame.sort_values('pickup_utc')
+    boundary=frame.pickup_utc.iloc[int(len(frame)*.8)].ceil('h')
+    before=frame.loc[frame.pickup_utc.lt(boundary)]
+    train=before.loc[before.dropoff_utc.lt(boundary)].copy()
+    validation=frame.loc[frame.pickup_utc.ge(boundary)].copy()
+    assert train.dropoff_utc.max()<validation.pickup_utc.min()
+    assert set(train.weather_time_utc).isdisjoint(validation.weather_time_utc)
+    result={'modeling_period':'January-November 2020','target_ratio':'80/20',
+            'validation_start_local':str(boundary.tz_convert('America/New_York')),
+            'train':len(train),'validation':len(validation),'boundary_overlap_excluded_from_training_view':len(before)-len(train),
+            'training_percent':100*len(train)/(len(train)+len(validation)),'source_rows_deleted':0}
+    (root/'reports').mkdir(exist_ok=True)
+    (root/'reports/split_assignment.json').write_text(json.dumps(result,indent=2))
+    return {'train':train,'validation':validation}

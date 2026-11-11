@@ -1,7 +1,5 @@
 {
   "seed": 672,
-  "sample_size_jan_nov": 50000,
-  "sample_size_december": 10000,
   "sampling": "Uniform random priorities over eligible source rows, not equal monthly quotas",
   "files": [
     {
@@ -80,13 +78,8 @@
       "sha256": "478716ac6420213ab45d9a1107fe5a1ba8c59de0e4bc27588b6f3b2079ad7210",
       "source_rows": 1509000,
       "eligible_rows": 1499269
-    },
-    {
-      "month": 12,
-      "file": "yellow_tripdata_2020-12.parquet",
-      "sha256": "b3e029240c4af3b8bc373169a7412150d5eb1721e2b8498975c13226dfd2bb55",
-      "source_rows": 1461898,
-      "eligible_rows": 1455478
     }
-  ]
+  ],
+  "sample_size": 50000,
+  "modeling_period": "January-November 2020"
 }

@@ -1,4 +1,3 @@
-# Workflow dependencies. See requirements-training-snapshot.txt for the tested direct versions.
 numpy
 pandas
 pyarrow
