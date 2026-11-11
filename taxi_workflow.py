@@ -1,4 +1,3 @@
-"""Project implementation exported into Taxi_Project_2.ipynb; edit the notebook."""
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.parse import urlencode
