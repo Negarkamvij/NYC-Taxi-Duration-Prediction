@@ -16,17 +16,19 @@ I combine NYC Yellow Taxi records and NYC weather data to build and compare Tens
 - A real PyTorch taxi-data DNN run, matching TensorFlow reference and framework comparison.
 - One additional dropout DNN and a conclusion based only on executed results.
 
-The main notebook is self-contained and is the source of truth. The `.py` file contains its matching functions. All 18 code cells passed end to end. In total, 47 Keras fits and one PyTorch fit completed 100 epochs each; this includes the required grid and additional comparisons. No runs failed.
+The main notebook is self-contained and is the source of truth. The `.py` file contains its matching functions. The uploaded Colab run has saved outputs with no Python error outputs. The added diagnostic cell for trips up to 180 minutes still needs execution in the active Colab session. In total, 47 Keras fits and one PyTorch fit completed 100 epochs each; this includes the required grid and additional comparisons. No runs failed.
 
 ## Main results
-The selected TensorFlow model is the MLP with MAE loss, SGD and learning rate 0.01. Its all-row validation MAE is 5.010 minutes; the three-seed configuration mean is 5.014 ± 0.004 minutes. Long recorded durations strongly affect RMSE. All-row metrics remain primary; filtered metrics do not replace them.
+The selected TensorFlow model is the MLP with MAE loss, SGD and learning rate 0.01. In the uploaded Colab run, its all-row validation MAE is 5.004 minutes and its three-seed configuration mean is 5.013 ± 0.010 minutes. Its selected checkpoint is epoch 40. Long recorded durations strongly affect RMSE. All-row metrics remain primary; filtered metrics do not replace them.
 
-[Conclusion](reports/Conclusion.md) | [Grid results](reports/grid_results.csv) | [Seed comparison](reports/seed_summary.csv) | [Framework comparison](reports/framework_comparison.csv)
+[Conclusion from the uploaded Colab run](reports/Conclusion.md)
+
+The following CSV reports are retained from the earlier local run and differ from the latest Colab outputs in the notebook: [Grid results](reports/grid_results.csv) | [Seed comparison](reports/seed_summary.csv) | [Framework comparison](reports/framework_comparison.csv)
 
 ## Running
 I run the notebook in order. In Colab, Setup mounts Google Drive and uses `MyDrive/taxi_project` for persistent files; locally it uses the working directory. Put `assignment_sample.parquet` in `outputs/` to reuse the same sample and avoid downloading eleven taxi months. The submission package includes that file. If no sample is present, the notebook downloads the sources and creates it.
 
-`requirements-tested.txt` records the tested local package versions. Saved reference timings are local-CPU measurements, not estimates for Colab. Matching caches are reused only when configuration, feature list, input width and row context agree. Old-feature runs remain in the local `outputs/old_runs` folder and are never searched for current results.
+`requirements-tested.txt` records the tested local package versions. The retained CSV reports contain earlier local CPU measurements. The notebook and conclusion use the uploaded Colab results, including measured framework times of 69.3 seconds for TensorFlow and 151.9 seconds for PyTorch. Matching caches are reused only when configuration, feature list, input width and row context agree. Old-feature runs remain in the local `outputs/old_runs` folder and are never searched for current results.
 
 Raw files, weights, backups and run caches are excluded from Git. The submission package contains the current sample and models. Prior files are retained locally in `backups/`.
 
