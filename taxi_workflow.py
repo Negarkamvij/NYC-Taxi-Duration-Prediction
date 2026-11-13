@@ -306,13 +306,6 @@ def fit_tensorflow(config: dict, inputs: dict[str, np.ndarray], targets: dict[st
     return result
 
 
-def collect_results(root: Path) -> pd.DataFrame:
-    """Collect only current-feature runs; archived runs are outside this directory."""
-    records = [json.loads(path.read_text()) for path in (root / "outputs/runs").glob("*/result.json")]
-    table = pd.DataFrame(records)
-    if not table.empty:
-        table.to_csv(root / "reports/experiment_results.csv", index=False)
-    return table
 
 
 def error_analysis(frame: pd.DataFrame, predictions: np.ndarray, root: Path) -> dict[str, pd.DataFrame]:
