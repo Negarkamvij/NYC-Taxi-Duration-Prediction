@@ -16,7 +16,7 @@ I combine NYC Yellow Taxi records and NYC weather data to build and compare Tens
 - A real PyTorch taxi-data DNN run, matching TensorFlow reference and framework comparison.
 - One additional dropout DNN and a conclusion based only on executed results.
 
-The main notebook is self-contained and is the source of truth. The `.py` file contains its matching functions. The uploaded Colab run has saved outputs with no Python error outputs. The added diagnostic cell for trips up to 180 minutes still needs execution in the active Colab session. In total, 47 Keras fits and one PyTorch fit completed 100 epochs each; this includes the required grid and additional comparisons. No runs failed.
+The main notebook is self-contained and is the source of truth. The `.py` file contains its matching functions. The uploaded Colab run has saved outputs with no Python error outputs. The saved notebook includes the executed subgroup tables for trips up to 180 minutes, the long-trip frequency comparison, and the refreshed residual plot. In total, 47 Keras fits and one PyTorch fit completed 100 epochs each; this includes the required grid and additional comparisons. No runs failed.
 
 ## Main results
 The selected TensorFlow model is the MLP with MAE loss, SGD and learning rate 0.01. In the uploaded Colab run, its all-row validation MAE is 5.004 minutes and its three-seed configuration mean is 5.013 ± 0.010 minutes. Its selected checkpoint is epoch 40. Long recorded durations strongly affect RMSE. All-row metrics remain primary; filtered metrics do not replace them.
